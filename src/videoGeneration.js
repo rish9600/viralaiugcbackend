@@ -39,24 +39,15 @@ async function ensureCompatibleCodec(videoUrl, outputDir, id) {
       detectedCodec = stdout.trim().toLowerCase();
       console.log(`Detected source codec: ${detectedCodec}`);
 
-      // Check if transcoding is needed
-      if (detectedCodec !== 'h264' && detectedCodec !== 'avc1') {
-        needsTranscode = true;
-        console.log(`Codec ${detectedCodec} detected, transcoding to H.264 required`);
-      } else {
-        console.log('Video already uses H.264 codec, no transcoding needed');
-      }
+      // Always transcode to ensure compatibility
+      needsTranscode = true;
+      console.log(`Transcoding video to ensure compatibility`);
     } catch (err) {
       console.warn(
         'Could not detect video codec, will transcode to be safe:',
         err.message
       );
       needsTranscode = true;
-    }
-
-    // If transcoding is not needed, return original URL
-    if (!needsTranscode) {
-      return videoUrl;
     }
 
     // Transcode to H.264
@@ -67,21 +58,23 @@ async function ensureCompatibleCodec(videoUrl, outputDir, id) {
       const command = ffmpeg(videoUrl)
         .outputOptions([
           "-c:v libx264", // Use H.264 codec
-          "-crf 18", // Higher quality (lower number = better quality)
-          "-preset slow", // Better compression
+          "-crf 23", // Standard quality
+          "-preset medium", // Balanced encoding speed
           "-c:a aac", // AAC audio codec
-          "-b:a 192k", // Audio bitrate
+          "-b:a 128k", // Standard audio bitrate
           "-strict experimental",
           "-movflags +faststart", // Enable fast start for web playback
           "-pix_fmt yuv420p", // Ensure compatibility
           "-profile:v baseline", // Use baseline profile for maximum compatibility
           "-level 3.0", // Set compatibility level
-          "-maxrate 4M", // Higher maximum bitrate
-          "-bufsize 8M", // Larger buffer size
+          "-maxrate 2M", // Conservative maximum bitrate
+          "-bufsize 4M", // Conservative buffer size
           "-threads 0", // Use all available CPU threads
           "-y", // Overwrite output file if exists
           "-vf scale=1920:1080:force_original_aspect_ratio=decrease", // Force 1080p resolution
-          "-r 30" // Force 30fps
+          "-r 30", // Force 30fps
+          "-vsync 1", // Ensure frame rate consistency
+          "-async 1" // Ensure audio sync
         ])
         .output(tempFile);
 
