@@ -56,13 +56,15 @@ async function validateVideo(videoUrl) {
                 return;
             }
 
-            // Get video metadata
+            // Get video metadata without codec restrictions
             resolve({
                 width: videoStream.width,
                 height: videoStream.height,
                 duration: parseFloat(metadata.format.duration),
                 codec: videoStream.codec_name,
-                format: metadata.format.format_name
+                format: metadata.format.format_name,
+                bitrate: metadata.format.bit_rate,
+                size: metadata.format.size
             });
         });
     });

@@ -64,19 +64,28 @@ async function ensureCompatibleCodec(videoUrl, outputDir, id) {
     console.log(`Transcoding to H.264: ${tempFile}`);
 
     return new Promise((resolve, reject) => {
-      ffmpeg(videoUrl)
+      const command = ffmpeg(videoUrl)
         .outputOptions([
           "-c:v libx264", // Use H.264 codec
           "-crf 23", // Reasonable quality
-          "-preset fast", // Fast encoding speed
+          "-preset medium", // Balanced encoding speed
           "-c:a aac", // AAC audio codec
           "-strict experimental",
           "-movflags +faststart", // Enable fast start for web playback
           "-pix_fmt yuv420p", // Ensure compatibility
           "-profile:v high", // Use high profile for better quality
-          "-level 4.0" // Set compatibility level
+          "-level 4.0", // Set compatibility level
+          "-maxrate 2M", // Limit maximum bitrate
+          "-bufsize 4M", // Buffer size for rate control
+          "-threads 0", // Use all available CPU threads
+          "-y" // Overwrite output file if exists
         ])
-        .output(tempFile)
+        .output(tempFile);
+
+      // Log FFmpeg command for debugging
+      console.log('FFmpeg command:', command._getArguments().join(' '));
+
+      command
         .on("progress", (progress) => {
           const percent = Math.round(progress.percent || 0);
           if (percent % 25 === 0) { // Log every 25%
