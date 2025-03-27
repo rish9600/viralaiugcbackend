@@ -1,0 +1,19 @@
+{
+  "name": "remotion-video-api",
+  "version": "1.0.0",
+  "description": "Remotion video generation API as a serverless function",
+  "handler": "handler.js",
+  "runtime": "nodejs18",
+  "minVCPU": 4,
+  "minMemory": 16,
+  "maxConcurrency": 5,
+  "timeout": 600,
+  "github": {
+    "branch": "main",
+    "buildType": "dockerfile"
+  },
+  "env": {
+    "PORT": "8000",
+    "RENDER_CONCURRENCY": "2"
+  }
+} 

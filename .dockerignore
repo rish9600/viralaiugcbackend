@@ -1,0 +1,28 @@
+# Node.js
+node_modules
+npm-debug.log
+yarn-debug.log
+yarn-error.log
+
+# Environment
+.env
+.env.*
+
+# Output files
+out/
+*.mp4
+*.mov
+*.avi
+*.mkv
+
+# Development
+.git
+.gitignore
+.github
+*.md
+!README.md
+!RUNPOD_DEPLOYMENT.md
+
+# OS
+.DS_Store
+Thumbs.db 
