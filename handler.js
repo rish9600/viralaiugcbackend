@@ -56,18 +56,13 @@ async function validateVideo(videoUrl) {
                 return;
             }
 
-            // Check codec
-            const codec = videoStream.codec_name;
-            if (!['h264'].includes(codec.toLowerCase())) {
-                reject(new Error(`Unsupported video codec: ${codec}. Please use H.264`));
-                return;
-            }
-
+            // Get video metadata
             resolve({
                 width: videoStream.width,
                 height: videoStream.height,
                 duration: parseFloat(metadata.format.duration),
-                codec: codec
+                codec: videoStream.codec_name,
+                format: metadata.format.format_name
             });
         });
     });
@@ -300,8 +295,15 @@ async function handler(event) {
             .single();
 
         if (error) {
+            console.error('Supabase fetch error:', error);
             throw new Error(`Failed to fetch video data: ${error.message}`);
         }
+
+        if (!videoData) {
+            throw new Error(`No video data found for ID: ${id}`);
+        }
+
+        console.log('Video data fetched successfully:', JSON.stringify(videoData));
 
         // Add to render queue with the full video data
         await renderQueue.add(id, videoData);
@@ -312,6 +314,7 @@ async function handler(event) {
 
         while (attempts < maxAttempts) {
             const queueStatus = renderQueue.getStatus();
+            console.log('Current queue status:', queueStatus);
             
             if (queueStatus.queueLength === 0 && queueStatus.runningJobs === 0) {
                 return {
@@ -328,10 +331,30 @@ async function handler(event) {
         throw new Error('Video generation timed out');
     } catch (error) {
         console.error('Handler error:', error);
+        console.error('Error stack:', error.stack);
+        
         // Clean up resources
         if (renderQueue) {
             renderQueue.clear();
         }
+        
+        // Update Supabase with error status
+        try {
+            await supabase
+                .from('generated_videos')
+                .update({
+                    status: 'failed',
+                    error: {
+                        message: error.message,
+                        stack: error.stack,
+                        timestamp: new Date().toISOString()
+                    }
+                })
+                .eq('id', event.input?.id);
+        } catch (updateError) {
+            console.error('Failed to update error status in Supabase:', updateError);
+        }
+
         return {
             error: error.message,
             details: error.stack

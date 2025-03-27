@@ -58,24 +58,23 @@ RUN npm ci
 # Copy the rest of the application
 COPY . .
 
-# Create output directory
-RUN mkdir -p ./out
+# Create necessary directories
+RUN mkdir -p ./out ./dist
+
+# Create a simple HTML file for Remotion
+RUN echo '<!DOCTYPE html><html><head><title>Remotion Bundle</title></head><body><div id="root"></div></body></html>' > dist/index.html
 
 # Set environment variables
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
     PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium \
     CHROME_PATH=/usr/bin/chromium \
     REMOTION_CHROME_PATH=/usr/bin/chromium \
-    NODE_ENV=production
+    NODE_ENV=production \
+    PORT=8000 \
+    RENDER_CONCURRENCY=2
 
-# Create dist directory
-RUN mkdir -p dist
-
-# Copy pre-built Remotion bundle or create a simple one
-RUN echo '<!DOCTYPE html><html><head><title>Remotion Bundle</title></head><body><div id="root"></div></body></html>' > dist/index.html
-
-# Expose port (for local testing)
+# Expose port
 EXPOSE 8000
 
-# Set the entry point for RunPod serverless
+# Set the entry point
 CMD ["node", "handler.js"] 

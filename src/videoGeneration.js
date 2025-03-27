@@ -31,22 +31,24 @@ async function ensureCompatibleCodec(videoUrl, outputDir, id) {
   try {
     // Try to detect source video codec using ffprobe
     let needsTranscode = false;
+    let detectedCodec = null;
 
     try {
       const ffprobeCommand = `ffprobe -v error -select_streams v:0 -show_entries stream=codec_name -of default=noprint_wrappers=1:nokey=1 "${videoUrl}"`;
       const { stdout } = await execPromise(ffprobeCommand);
-
-      const detectedCodec = stdout.trim().toLowerCase();
+      detectedCodec = stdout.trim().toLowerCase();
       console.log(`Detected source codec: ${detectedCodec}`);
 
       // Check if transcoding is needed
-      if (detectedCodec === "hevc" || detectedCodec === "h265") {
+      if (detectedCodec !== 'h264' && detectedCodec !== 'avc1') {
         needsTranscode = true;
-        console.log("HEVC/H.265 codec detected, transcoding required");
+        console.log(`Codec ${detectedCodec} detected, transcoding to H.264 required`);
+      } else {
+        console.log('Video already uses H.264 codec, no transcoding needed');
       }
     } catch (err) {
       console.warn(
-        "Could not detect video codec, will transcode to be safe:",
+        'Could not detect video codec, will transcode to be safe:',
         err.message
       );
       needsTranscode = true;
@@ -54,7 +56,6 @@ async function ensureCompatibleCodec(videoUrl, outputDir, id) {
 
     // If transcoding is not needed, return original URL
     if (!needsTranscode) {
-      console.log("Video already uses compatible codec, no transcoding needed");
       return videoUrl;
     }
 
@@ -70,12 +71,17 @@ async function ensureCompatibleCodec(videoUrl, outputDir, id) {
           "-preset fast", // Fast encoding speed
           "-c:a aac", // AAC audio codec
           "-strict experimental",
+          "-movflags +faststart", // Enable fast start for web playback
+          "-pix_fmt yuv420p", // Ensure compatibility
+          "-profile:v high", // Use high profile for better quality
+          "-level 4.0" // Set compatibility level
         ])
         .output(tempFile)
         .on("progress", (progress) => {
-          // console.log(
-          //   `Transcoding progress: ${Math.round(progress.percent || 0)}%`
-          // );
+          const percent = Math.round(progress.percent || 0);
+          if (percent % 25 === 0) { // Log every 25%
+            console.log(`Transcoding progress: ${percent}%`);
+          }
         })
         .on("end", () => {
           console.log("Transcoding completed successfully");
