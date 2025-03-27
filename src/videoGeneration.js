@@ -58,23 +58,17 @@ async function ensureCompatibleCodec(videoUrl, outputDir, id) {
       const command = ffmpeg(videoUrl)
         .outputOptions([
           "-c:v libx264", // Use H.264 codec
-          "-crf 23", // Standard quality
-          "-preset medium", // Balanced encoding speed
+          "-preset ultrafast", // Fastest encoding for testing
+          "-crf 28", // Slightly lower quality but more compatible
           "-c:a aac", // AAC audio codec
           "-b:a 128k", // Standard audio bitrate
-          "-strict experimental",
           "-movflags +faststart", // Enable fast start for web playback
           "-pix_fmt yuv420p", // Ensure compatibility
           "-profile:v baseline", // Use baseline profile for maximum compatibility
           "-level 3.0", // Set compatibility level
-          "-maxrate 2M", // Conservative maximum bitrate
-          "-bufsize 4M", // Conservative buffer size
-          "-threads 0", // Use all available CPU threads
           "-y", // Overwrite output file if exists
-          "-vf scale=1920:1080:force_original_aspect_ratio=decrease", // Force 1080p resolution
-          "-r 30", // Force 30fps
-          "-vsync 1", // Ensure frame rate consistency
-          "-async 1" // Ensure audio sync
+          "-vf scale=1280:720:force_original_aspect_ratio=decrease", // Force 720p resolution
+          "-r 30" // Force 30fps
         ])
         .output(tempFile);
 
