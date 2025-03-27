@@ -26,31 +26,10 @@ const execPromise = util.promisify(exec);
 async function ensureCompatibleCodec(videoUrl, outputDir, id) {
   if (!videoUrl) return null;
 
-  console.log(`Checking codec compatibility for: ${videoUrl}`);
+  console.log(`Processing video: ${videoUrl}`);
 
   try {
-    // Try to detect source video codec using ffprobe
-    let needsTranscode = false;
-    let detectedCodec = null;
-
-    try {
-      const ffprobeCommand = `ffprobe -v error -select_streams v:0 -show_entries stream=codec_name -of default=noprint_wrappers=1:nokey=1 "${videoUrl}"`;
-      const { stdout } = await execPromise(ffprobeCommand);
-      detectedCodec = stdout.trim().toLowerCase();
-      console.log(`Detected source codec: ${detectedCodec}`);
-
-      // Always transcode to ensure compatibility
-      needsTranscode = true;
-      console.log(`Transcoding video to ensure compatibility`);
-    } catch (err) {
-      console.warn(
-        'Could not detect video codec, will transcode to be safe:',
-        err.message
-      );
-      needsTranscode = true;
-    }
-
-    // Transcode to H.264
+    // Always transcode to ensure consistent output
     const tempFile = path.join(outputDir, `temp-h264-${id}-${Date.now()}.mp4`);
     console.log(`Transcoding to H.264: ${tempFile}`);
 
@@ -58,17 +37,24 @@ async function ensureCompatibleCodec(videoUrl, outputDir, id) {
       const command = ffmpeg(videoUrl)
         .outputOptions([
           "-c:v libx264", // Use H.264 codec
-          "-preset ultrafast", // Fastest encoding for testing
-          "-crf 28", // Slightly lower quality but more compatible
+          "-crf 23", // Standard quality
+          "-preset medium", // Balanced encoding speed
           "-c:a aac", // AAC audio codec
           "-b:a 128k", // Standard audio bitrate
+          "-strict experimental",
           "-movflags +faststart", // Enable fast start for web playback
           "-pix_fmt yuv420p", // Ensure compatibility
           "-profile:v baseline", // Use baseline profile for maximum compatibility
           "-level 3.0", // Set compatibility level
+          "-maxrate 2M", // Conservative maximum bitrate
+          "-bufsize 4M", // Conservative buffer size
+          "-threads 0", // Use all available CPU threads
           "-y", // Overwrite output file if exists
-          "-vf scale=1280:720:force_original_aspect_ratio=decrease", // Force 720p resolution
-          "-r 30" // Force 30fps
+          "-vf scale=1920:1080:force_original_aspect_ratio=decrease", // Force 1080p resolution
+          "-r 30", // Force 30fps
+          "-vsync 1", // Ensure frame rate consistency
+          "-async 1", // Ensure audio sync
+          "-max_muxing_queue_size 1024" // Increase muxing queue size
         ])
         .output(tempFile);
 
@@ -93,7 +79,7 @@ async function ensureCompatibleCodec(videoUrl, outputDir, id) {
         .run();
     });
   } catch (error) {
-    console.error("Error in codec compatibility check:", error);
+    console.error("Error in video processing:", error);
     return videoUrl; // Fall back to original URL if anything fails
   }
 }
