@@ -171,17 +171,10 @@ export const ${componentName} = (props) => {
     <AbsoluteFill style={{ backgroundColor: 'black' }}>
       {/* Video or Image Background */}
       <div style={{ position: 'relative', width: '100%', height: '100%' }}>
-        <RemotionVideo
-          src={videoSource}
-          style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-          onError={(error) => {
-            console.error('Video playback error:', error);
-            // Log the error but don't throw it
-          }}
-          muted={true}
-          playsInline={true}
-          preload="auto"
-        />
+      <RemotionVideo
+        src={videoSource}
+        style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+      />
         {/* Title with dynamic position */}
           <div
             style={{
