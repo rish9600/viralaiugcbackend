@@ -26,12 +26,12 @@ const execPromise = util.promisify(exec);
 async function ensureCompatibleCodec(videoUrl, outputDir, id) {
   if (!videoUrl) return null;
 
-  console.log(`Processing video: ${videoUrl}`);
+  console.log(`[${id}] Starting processing for video URL: ${videoUrl}`);
 
   try {
     // Always transcode to ensure consistent output
     const tempFile = path.join(outputDir, `temp-h264-${id}-${Date.now()}.mp4`);
-    console.log(`Transcoding to H.264: ${tempFile}`);
+    console.log(`[${id}] Transcoding to H.264 target path: ${tempFile}`);
 
     return new Promise((resolve, reject) => {
       const command = ffmpeg(videoUrl)
@@ -59,27 +59,33 @@ async function ensureCompatibleCodec(videoUrl, outputDir, id) {
         .output(tempFile);
 
       // Log FFmpeg command for debugging
-      console.log('FFmpeg command:', command._getArguments().join(' '));
+      console.log(`[${id}] FFmpeg command: ffmpeg ${command._getArguments().join(' ')}`);
 
       command
         .on("progress", (progress) => {
           const percent = Math.round(progress.percent || 0);
           if (percent % 25 === 0) { // Log every 25%
-            console.log(`Transcoding progress: ${percent}%`);
+            console.log(`[${id}] Transcoding progress: ${percent}%`);
           }
         })
         .on("end", () => {
-          console.log("Transcoding completed successfully");
+          console.log(`[${id}] FFmpeg transcoding completed successfully for: ${tempFile}`);
+          // Optional: Add a small delay or check file existence/size here if needed
           resolve(tempFile);
         })
-        .on("error", (err) => {
-          console.error("Transcoding error:", err);
-          reject(err);
+        .on("error", (err, stdout, stderr) => { // Capture stdout/stderr
+          console.error(`[${id}] FFmpeg transcoding error for URL ${videoUrl}:`, err.message);
+          console.error(`[${id}] FFmpeg stdout:`, stdout);
+          console.error(`[${id}] FFmpeg stderr:`, stderr);
+          // Reject with a more informative error
+          reject(new Error(`FFmpeg failed for ${videoUrl}: ${err.message}`));
         })
         .run();
     });
   } catch (error) {
-    console.error("Error in video processing:", error);
+    console.error(`[${id}] Error in ensureCompatibleCodec for ${videoUrl}:`, error);
+    // Fallback might hide the root cause, consider re-throwing or handling differently
+    // For now, keep the fallback but log the error clearly
     return videoUrl; // Fall back to original URL if anything fails
   }
 }
