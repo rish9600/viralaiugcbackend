@@ -5,34 +5,24 @@ const path = require('path');
 const fs = require('fs');
 const supabase = require('./config/supabase.config');
 const handleVideoGeneration = require('./src/videoGeneration');
-const { initializeFileServer } = require('./src/fileServer');
 const ffmpeg = require('fluent-ffmpeg');
 const { getCompositions } = require('@remotion/renderer');
 
-// Create output directory if it doesn't exist
-const outputDir = path.resolve(__dirname, './out');
+// Create output directory if it doesn't exist - Use /tmp for serverless environments
+const outputDir = path.resolve('/tmp', './out'); 
 if (!fs.existsSync(outputDir)) {
-    fs.mkdirSync(outputDir);
+    // Recursively create directory if it doesn't exist
+    fs.mkdirSync(outputDir, { recursive: true });
 }
 
-// Path to the Remotion bundle
+// Path to the Remotion bundle (Assuming it's copied in Dockerfile)
 const bundlePath = path.join(__dirname, 'dist');
 
-// Create Express app
-const app = express();
-const port = process.env.PORT || 8000;
-
-// Middlewares
-app.use(cors());
-app.use(bodyParser.json({ limit: '50mb' }));
-app.use('/videos', express.static(outputDir));
-app.use('/public', express.static(path.join(__dirname, './public')));
-app.use('/dist', express.static(bundlePath));
-
 // Configuration for video rendering
-const RENDER_CONCURRENCY = parseInt(process.env.RENDER_CONCURRENCY || '2');
+// Concurrency is handled by RunPod, RENDER_CONCURRENCY might not be needed or used differently
+// const RENDER_CONCURRENCY = parseInt(process.env.RENDER_CONCURRENCY || '2');
 
-// Function to validate video file
+// Function to validate video file (Keep as it's used by handleVideoGeneration indirectly via ensureCompatibleCodec)
 async function validateVideo(videoUrl) {
     return new Promise((resolve, reject) => {
         if (!videoUrl) {
@@ -70,351 +60,121 @@ async function validateVideo(videoUrl) {
     });
 }
 
-// Job queue for handling concurrent renders
-class RenderQueue {
-    constructor(concurrency = 2) {
-        this.queue = [];
-        this.concurrency = concurrency;
-        this.running = 0;
-    }
+// RunPod handler function
+// Expects input in event.input
+async function handler(event) {
+    console.log("RunPod Handler invoked with event:", JSON.stringify(event, null, 2));
 
-    add(id, data) {
-        return new Promise(async (resolve, reject) => {
-            try {
-                // Validate that we have the required data
-                if (!data || !data.remotion) {
-                    throw new Error('Missing required video data or remotion configuration');
-                }
-
-                // Validate video sources if they exist
-                if (data.remotion.template) {
-                    await validateVideo(data.remotion.template);
-                }
-                if (data.remotion.demo) {
-                    await validateVideo(data.remotion.demo);
-                }
-
-                // Add to queue with validated data
-                this.queue.push({ id, data, resolve, reject });
-                this.process();
-            } catch (error) {
-                console.error('Video validation error:', error);
-                reject(error);
-            }
-        });
-    }
-
-    async process() {
-        if (this.running >= this.concurrency || this.queue.length === 0) {
-            return;
-        }
-
-        const job = this.queue.shift();
-        this.running++;
-
-        try {
-            console.log('Processing job with data:', JSON.stringify(job.data));
-            await handleVideoGeneration(job.id, job.data, outputDir);
-            job.resolve();
-        } catch (error) {
-            console.error('Job processing error:', error);
-            job.reject(error);
-        } finally {
-            this.running--;
-            this.process();
-        }
-    }
-
-    getStatus() {
+    if (!event || !event.input) {
+        console.error("Error: Invalid event input received.");
         return {
-            queueLength: this.queue.length,
-            runningJobs: this.running,
+            error: "Invalid input received. Expected event.input object.",
         };
     }
 
-    clear() {
-        this.queue = [];
-        this.running = 0;
+    // Extract the necessary data passed from the edge function
+    // Assuming the edge function sends the 'data' object (fetched from Supabase) and 'id' directly within event.input
+    const { id, ...videoData } = event.input; 
+
+    if (!id || !videoData) {
+        console.error("Error: Missing 'id' or video data in event.input.");
+        return {
+            error: "Missing 'id' or video data in event.input.",
+        };
     }
-}
 
-// Initialize render queue
-const renderQueue = new RenderQueue(RENDER_CONCURRENCY);
+    console.log(`Processing job for ID: ${id}`);
 
-// Status endpoint
-app.get('/status', (req, res) => {
     try {
-        const queueStatus = renderQueue.getStatus();
-        res.status(200).json({
-            status: 'ok',
-            uptime: process.uptime(),
-            timestamp: new Date().toISOString(),
-            queue: queueStatus,
-        });
+        // Validate required fields in videoData if necessary (though handleVideoGeneration might do this)
+        if (!videoData.remotion) {
+             throw new Error("Missing 'remotion' configuration in input data");
+        }
+
+        // Validate video sources if they exist, using the existing validation function
+        // This might be redundant if handleVideoGeneration already does it thoroughly
+        if (videoData.remotion.template) {
+            console.log(`Validating template URL: ${videoData.remotion.template}`);
+            await validateVideo(videoData.remotion.template);
+            console.log("Template URL validated.");
+        }
+        if (videoData.remotion.demo) {
+            console.log(`Validating demo URL: ${videoData.remotion.demo}`);
+            await validateVideo(videoData.remotion.demo);
+             console.log("Demo URL validated.");
+        }
+
+        console.log('Starting video generation process...');
+        // Directly call the video generation function
+        // Pass the id and the data object (which includes 'remotion' field etc.)
+        // Pass the adjusted output directory
+        await handleVideoGeneration(id, videoData, outputDir);
+
+        console.log(`Successfully completed video generation for ID: ${id}`);
+
+        // Return success response as expected by RunPod
+        return {
+            message: `Video generation successful for ID: ${id}`,
+            videoId: id,
+            status: 'completed' 
+        };
+
     } catch (error) {
-        console.error('Status endpoint error:', error);
-        res.status(500).json({ error: 'Internal server error' });
-    }
-});
+        console.error(`Error processing video generation for ID ${id}:`, error);
 
-// Video generation endpoint
-app.post('/trigger-video-generation', async (req, res) => {
-    try {
-        const { id } = req.body;
-
-        if (!id) {
-            return res.status(400).json({
-                success: false,
-                message: 'Missing required parameter: id',
-            });
-        }
-
-        // Fetch the record from Supabase
-        const { data, error } = await supabase
-            .from('generated_videos')
-            .select('*')
-            .eq('id', id)
-            .single();
-
-        if (error) {
-            return res.status(404).json({
-                success: false,
-                message: 'Record not found',
-                error: error.message,
-            });
-        }
-
-        // Add to the render queue
-        renderQueue
-            .add(id, data)
-            .then(() => {
-                console.log(`Video generation for ID: ${id} completed`);
-            })
-            .catch((error) => {
-                console.error(`Video generation for ID: ${id} failed:`, error);
-            });
-
-        res.json({
-            success: true,
-            message: 'Video generation process added to queue',
-            id,
-            queueStatus: renderQueue.getStatus(),
-        });
-    } catch (error) {
-        console.error('Error triggering video generation:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Failed to trigger video generation',
-            error: error.message,
-        });
-    }
-});
-
-// Initialize server and setup Supabase subscription
-let server = null;
-
-function startServer() {
-    return new Promise((resolve, reject) => {
-        try {
-            if (server) {
-                resolve(server);
-                return;
-            }
-
-            // Initialize file server
-            initializeFileServer(outputDir);
-
-            // Start Express server
-            server = app.listen(port, async () => {
-                console.log(`Server running at http://localhost:${port}`);
-                
-                try {
-                    // Initialize Supabase real-time subscription
-                    const subscription = supabase
-                        .channel('table-db-changes')
-                        .on(
-                            'postgres_changes',
-                            {
-                                event: 'INSERT',
-                                schema: 'public',
-                                table: 'generated_videos',
-                            },
-                            (payload) => {
-                                console.log('New video generation request received:', payload.new.id);
-                                renderQueue
-                                    .add(payload.new.id, payload.new)
-                                    .catch((error) =>
-                                        console.error(
-                                            `Queue processing error for ${payload.new.id}:`,
-                                            error
-                                        )
-                                    );
-                            }
-                        )
-                        .subscribe();
-
-                    console.log('Supabase subscription established');
-                    resolve(server);
-                } catch (error) {
-                    console.error('Failed to initialize services:', error);
-                    resolve(server);
-                }
-            });
-
-            server.on('error', (error) => {
-                console.error('Server error:', error);
-                reject(error);
-            });
-
-        } catch (error) {
-            console.error('Error starting server:', error);
-            reject(error);
-        }
-    });
-}
-
-// RunPod handler function
-async function handler(event) {
-    try {
-        console.log('Handler started with event:', JSON.stringify(event));
-
-        // Start the server
-        await startServer();
-
-        // Validate input
-        const { id } = event.input || {};
-        if (!id) {
-            throw new Error('Missing required parameter: id');
-        }
-
-        console.log('Processing video generation for ID:', id);
-
-        // Fetch the record from Supabase to get video data
-        const { data: videoData, error } = await supabase
-            .from('generated_videos')
-            .select('*')
-            .eq('id', id)
-            .single();
-
-        if (error) {
-            console.error('Supabase fetch error:', error);
-            throw new Error(`Failed to fetch video data: ${error.message}`);
-        }
-
-        if (!videoData) {
-            throw new Error(`No video data found for ID: ${id}`);
-        }
-
-        console.log('Video data fetched successfully:', JSON.stringify(videoData));
-
-        // Add to render queue with the full video data
-        await renderQueue.add(id, videoData);
-
-        // Poll for completion
-        let attempts = 0;
-        const maxAttempts = 60; // 5 minutes with 5-second intervals
-
-        while (attempts < maxAttempts) {
-            const queueStatus = renderQueue.getStatus();
-            console.log('Current queue status:', queueStatus);
-            
-            if (queueStatus.queueLength === 0 && queueStatus.runningJobs === 0) {
-                return {
-                    id: id,
-                    status: 'completed',
-                    message: 'Video generation completed successfully'
-                };
-            }
-
-            await new Promise(resolve => setTimeout(resolve, 5000));
-            attempts++;
-        }
-
-        throw new Error('Video generation timed out');
-    } catch (error) {
-        console.error('Handler error:', error);
-        console.error('Error stack:', error.stack);
-        
-        // Clean up resources
-        if (renderQueue) {
-            renderQueue.clear();
-        }
-        
-        // Update Supabase with error status
+        // Attempt to update Supabase status to 'failed' even if handler fails
         try {
             await supabase
-                .from('generated_videos')
-                .update({
-                    status: 'failed',
-                    error: {
-                        message: error.message,
-                        stack: error.stack,
-                        timestamp: new Date().toISOString()
-                    }
-                })
-                .eq('id', event.input?.id);
+                .from("generated_videos")
+                .update({ status: "failed", error_message: error.message })
+                .eq("id", id);
         } catch (updateError) {
-            console.error('Failed to update error status in Supabase:', updateError);
+            console.error(`Failed to update Supabase status to 'failed' for ID ${id}:`, updateError);
         }
 
+        // Return error response as expected by RunPod
         return {
-            error: error.message,
-            details: error.stack
+            error: `Video generation failed for ID ${id}: ${error.message}`,
         };
+    } finally {
+        // Cleanup temporary files - handleVideoGeneration should already do this
+        console.log(`Handler execution finished for ID: ${id}.`);
+        cleanup(); 
     }
 }
 
-// Handle process errors
+// Handle process errors (Keep for robustness within the worker)
 process.on('uncaughtException', (error) => {
     console.error('Uncaught Exception:', error);
-    cleanup();
+    cleanup(); 
+    process.exit(1);
 });
 
 process.on('unhandledRejection', (reason, promise) => {
     console.error('Unhandled Rejection at:', promise, 'reason:', reason);
-    cleanup();
+    cleanup(); 
+    process.exit(1);
 });
 
+// SIGTERM handling for graceful shutdown (RunPod might send this)
 process.on('SIGTERM', () => {
-    console.log('Received SIGTERM signal');
-    cleanup();
+  console.log('Received SIGTERM. Shutting down gracefully...');
+  cleanup();
+  process.exit(0);
 });
 
-process.on('SIGINT', () => {
-    console.log('Received SIGINT signal');
-    cleanup();
-});
-
-// Cleanup function
+// Cleanup function (Keep if it handles resources like DB connections or temp files not covered elsewhere)
 function cleanup() {
-    console.log('Cleaning up resources...');
-    if (renderQueue) {
-        renderQueue.clear();
+    console.log('Running cleanup tasks...');
+    try {
+        if (fs.existsSync(outputDir)) {
+            console.log(`Cleaning up output directory: ${outputDir}`);
+        }
+    } catch (err) {
+        console.error("Error during cleanup:", err);
     }
-    if (server) {
-        server.close(() => {
-            console.log('Server closed');
-        });
-    }
+    console.log('Cleanup finished.');
 }
 
-// Export the handler
-exports.handler = handler;
-
-// If running directly (for testing)
-if (require.main === module) {
-    const testEvent = {
-        input: {
-            id: process.env.TEST_ID || 'test-id'
-        }
-    };
-
-    handler(testEvent)
-        .then(result => {
-            console.log('Test result:', result);
-        })
-        .catch(error => {
-            console.error('Test error:', error);
-            process.exit(1);
-        });
-} 
+// Export the handler for RunPod
+module.exports = { handler }; 

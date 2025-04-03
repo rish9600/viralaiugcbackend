@@ -69,12 +69,10 @@ ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
     PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium \
     CHROME_PATH=/usr/bin/chromium \
     REMOTION_CHROME_PATH=/usr/bin/chromium \
-    NODE_ENV=production \
-    PORT=8000 \
-    RENDER_CONCURRENCY=2
+    NODE_ENV=production
 
-# Expose port
-EXPOSE 8000
+# Expose port - Removed (Not needed for RunPod serverless)
+# EXPOSE 8000
 
 # Set the entry point
 CMD ["node", "handler.js"] 
