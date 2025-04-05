@@ -305,6 +305,7 @@ async function handleVideoGeneration(id, data, outputDir) {
       codec: "h264",
       outputLocation: outputPath,
       timeoutInMilliseconds: 900000, // 15 minutes overall timeout (increased from 7 min)
+      concurrency: 1,
       onProgress: (progress) => {
         // Use process.stdout.write with \r to update the same line
         const percent = Math.floor(progress.progress * 100);
@@ -319,6 +320,7 @@ async function handleVideoGeneration(id, data, outputDir) {
         }
       },
     });
+    process.stdout.write("\nRendering completed.\n");
 
     // Clean up the generated component files
     try {
