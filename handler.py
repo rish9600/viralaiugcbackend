@@ -2,6 +2,7 @@ import runpod
 import subprocess
 import json
 import os
+import sys
 
 # Get the directory where the handler.py script is located
 script_dir = os.path.dirname(os.path.realpath(__file__))
@@ -10,6 +11,8 @@ node_script_path = os.path.join(script_dir, 'handler.js')
 
 print(f"Python handler starting.")
 print(f"Node script path: {node_script_path}")
+sys.stdout.flush() # Force flush
+sys.stderr.flush()
 
 def handler(job):
     """ 
@@ -67,4 +70,6 @@ def handler(job):
 
 # Start the RunPod serverless worker
 print("Starting RunPod serverless worker...")
+sys.stdout.flush() # Force flush
+sys.stderr.flush()
 runpod.serverless.start({"handler": handler})
