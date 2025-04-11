@@ -1,8 +1,9 @@
 FROM node:18-bullseye-slim
 
-# Install dependencies required for video processing
+# Install dependencies required for video processing and Python package management
 RUN apt-get update && apt-get install -y \
     python3 \
+    python3-pip \
     ffmpeg \
     libvips \
     chromium \
@@ -55,6 +56,9 @@ COPY package*.json ./
 # Install dependencies
 RUN npm ci
 
+# Install Python dependencies
+RUN pip3 install runpod
+
 # Copy the rest of the application
 COPY . .
 
@@ -75,4 +79,4 @@ ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
 # EXPOSE 8000
 
 # Set the entry point
-CMD ["node", "handler.js"] 
+CMD ["python3", "handler.py"] 

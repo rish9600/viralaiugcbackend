@@ -6,7 +6,6 @@ const fs = require('fs');
 const supabase = require('./config/supabase.config');
 const handleVideoGeneration = require('./src/videoGeneration');
 const ffmpeg = require('fluent-ffmpeg');
-const { getCompositions } = require('@remotion/renderer');
 
 // Create output directory if it doesn't exist - Use /tmp for serverless environments
 const outputDir = path.resolve('/tmp', './out'); 
@@ -17,10 +16,6 @@ if (!fs.existsSync(outputDir)) {
 
 // Path to the Remotion bundle (Assuming it's copied in Dockerfile)
 const bundlePath = path.join(__dirname, 'dist');
-
-// Configuration for video rendering
-// Concurrency is handled by RunPod, RENDER_CONCURRENCY might not be needed or used differently
-// const RENDER_CONCURRENCY = parseInt(process.env.RENDER_CONCURRENCY || '2');
 
 // Function to validate video file (Keep as it's used by handleVideoGeneration indirectly via ensureCompatibleCodec)
 async function validateVideo(videoUrl) {
@@ -60,106 +55,134 @@ async function validateVideo(videoUrl) {
     });
 }
 
-// RunPod handler function
-// Expects input in event.input
-async function handler(event) {
-    console.log("RunPod Handler invoked with event:", JSON.stringify(event, null, 2));
+// This function is now the main execution logic called from the command line
+async function processVideoJob(jobInput) {
+    console.log("Node.js script invoked with input:", JSON.stringify(jobInput, null, 2));
 
-    if (!event || !event.input) {
-        console.error("Error: Invalid event input received.");
-        return {
-            error: "Invalid input received. Expected event.input object.",
-        };
-    }
-
-    // Extract the necessary data passed from the edge function
-    // Assuming the edge function sends the 'data' object (fetched from Supabase) and 'id' directly within event.input
-    const { id, ...videoData } = event.input; 
+    // Extract data from the input passed by Python
+    const { id, ...videoData } = jobInput;
 
     if (!id || !videoData) {
-        console.error("Error: Missing 'id' or video data in event.input.");
-        return {
-            error: "Missing 'id' or video data in event.input.",
-        };
+        console.error("Error: Missing 'id' or video data in job input.");
+        // Return error as JSON string for Python to capture
+        return JSON.stringify({
+            error: "Missing 'id' or video data in job input.",
+        });
     }
 
-    console.log(`Processing job for ID: ${id}`);
+    console.log(`Node: Processing job for ID: ${id}`);
 
     try {
-        // Validate required fields in videoData if necessary (though handleVideoGeneration might do this)
+        // --- Keep validation logic if necessary ---
         if (!videoData.remotion) {
              throw new Error("Missing 'remotion' configuration in input data");
         }
-
-        // Validate video sources if they exist, using the existing validation function
-        // This might be redundant if handleVideoGeneration already does it thoroughly
         if (videoData.remotion.template) {
-            console.log(`Validating template URL: ${videoData.remotion.template}`);
+            console.log(`Node: Validating template URL: ${videoData.remotion.template}`);
             await validateVideo(videoData.remotion.template);
-            console.log("Template URL validated.");
+            console.log("Node: Template URL validated.");
         }
         if (videoData.remotion.demo) {
-            console.log(`Validating demo URL: ${videoData.remotion.demo}`);
+            console.log(`Node: Validating demo URL: ${videoData.remotion.demo}`);
             await validateVideo(videoData.remotion.demo);
-             console.log("Demo URL validated.");
+             console.log("Node: Demo URL validated.");
         }
+        // -------------------------------------------
 
-        console.log('Starting video generation process...');
-        // Directly call the video generation function
-        // Pass the id and the data object (which includes 'remotion' field etc.)
-        // Pass the adjusted output directory
-        await handleVideoGeneration(id, videoData, outputDir);
+        console.log('Node: Starting video generation process...');
+        
+        // Call the video generation function
+        // NOTE: Ensure handleVideoGeneration internally handles Supabase updates 
+        // for success/failure, or modify it to return status/data
+        // which we can then use to update Supabase *here* if preferred.
+        // For now, assuming handleVideoGeneration manages its own status updates.
+        await handleVideoGeneration(id, videoData, outputDir); 
 
-        console.log(`Successfully completed video generation for ID: ${id}`);
+        console.log(`Node: Successfully completed video generation for ID: ${id}`);
 
-        // Return success response as expected by RunPod
-        return {
+        // Return success response as JSON string for Python
+        return JSON.stringify({
             message: `Video generation successful for ID: ${id}`,
             videoId: id,
-            status: 'completed' 
-        };
+            status: 'completed' // Assuming success if no error thrown
+        });
 
     } catch (error) {
-        console.error(`Error processing video generation for ID ${id}:`, error);
+        console.error(`Node: Error processing video generation for ID ${id}:`, error);
 
-        // Attempt to update Supabase status to 'failed' even if handler fails
+        // handleVideoGeneration should ideally handle the Supabase 'failed' update internally.
+        // If not, uncomment the Supabase update logic here.
+        /*
         try {
             await supabase
                 .from("generated_videos")
                 .update({ status: "failed", error_message: error.message })
                 .eq("id", id);
         } catch (updateError) {
-            console.error(`Failed to update Supabase status to 'failed' for ID ${id}:`, updateError);
+            console.error(`Node: Failed to update Supabase status to 'failed' for ID ${id}:`, updateError);
         }
+        */
 
-        // Return error response as expected by RunPod
-        return {
+        // Return error response as JSON string for Python
+        return JSON.stringify({
             error: `Video generation failed for ID ${id}: ${error.message}`,
-        };
+        });
     } finally {
-        // Cleanup temporary files - handleVideoGeneration should already do this
-        console.log(`Handler execution finished for ID: ${id}.`);
-        cleanup(); 
+        // Cleanup temporary files if needed (handleVideoGeneration might do this)
+        console.log(`Node: Handler execution finished for ID: ${id}.`);
+        // Call cleanup if it's still relevant and not handled within handleVideoGeneration
+        // cleanup(); 
     }
 }
+
+// --- Main execution block --- 
+// Read input JSON from command line argument
+if (process.argv.length < 3) {
+    console.error("Error: No input JSON provided as command line argument.");
+    // Output error as JSON string
+    console.log(JSON.stringify({ error: "No input JSON provided to Node.js script." }));
+    process.exit(1);
+}
+
+const inputJson = process.argv[2];
+
+try {
+    const jobInput = JSON.parse(inputJson);
+    // Call the main processing function and output its result
+    processVideoJob(jobInput)
+        .then(resultJson => {
+            console.log(resultJson); // Output the result JSON to stdout for Python
+            process.exit(0); // Exit cleanly
+        })
+        .catch(err => { // Catch any unexpected errors in processVideoJob promise chain
+            console.error("Node: Unhandled error in processVideoJob:", err);
+            console.log(JSON.stringify({ error: `Unhandled Node.js error: ${err.message}` }));
+            process.exit(1);
+        });
+} catch (parseError) {
+    console.error("Error: Failed to parse input JSON argument:", parseError);
+    console.log(JSON.stringify({ error: `Failed to parse input JSON: ${parseError.message}` }));
+    process.exit(1);
+}
+// ---------------------------
 
 // Handle process errors (Keep for robustness within the worker)
 process.on('uncaughtException', (error) => {
     console.error('Uncaught Exception:', error);
-    cleanup(); 
+    // cleanup(); 
     process.exit(1);
 });
 
 process.on('unhandledRejection', (reason, promise) => {
     console.error('Unhandled Rejection at:', promise, 'reason:', reason);
-    cleanup(); 
+    // cleanup(); 
     process.exit(1);
 });
 
 // SIGTERM handling for graceful shutdown (RunPod might send this)
 process.on('SIGTERM', () => {
   console.log('Received SIGTERM. Shutting down gracefully...');
-  cleanup();
+  // cleanup();
   process.exit(0);
 });
 
@@ -175,6 +198,3 @@ function cleanup() {
     }
     console.log('Cleanup finished.');
 }
-
-// Export the handler for RunPod
-module.exports = { handler }; 
