@@ -3,14 +3,24 @@ import subprocess
 import json
 import os
 import sys
-
-# Get the directory where the handler.py script is located
-script_dir = os.path.dirname(os.path.realpath(__file__))
-# Construct the absolute path to handler.js
-node_script_path = os.path.join(script_dir, 'handler.js')
+import traceback
 
 print(f"Python handler starting.")
-print(f"Node script path: {node_script_path}")
+sys.stdout.flush() # Force flush
+sys.stderr.flush()
+
+try:
+    # Get the directory where the handler.py script is located
+    script_dir = os.path.dirname(os.path.realpath(__file__))
+    # Construct the absolute path to handler.js
+    node_script_path = os.path.join(script_dir, 'handler.js')
+    print(f"Node script path: {node_script_path}")
+except Exception as e:
+    print(f"Error determining script path: {e}", file=sys.stderr)
+    print(traceback.format_exc(), file=sys.stderr)
+    # Exit if we can't determine the path, as the handler won't work
+    sys.exit(1)
+
 sys.stdout.flush() # Force flush
 sys.stderr.flush()
 
